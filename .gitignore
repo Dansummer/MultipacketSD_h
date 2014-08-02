@@ -1,0 +1,68 @@
+#define STR_BUFFER_SIZE 1024
+static word send_Bfill_position(const char strbuf[STR_BUFFER_SIZE + 1]) {
+  bfill = ether.tcpOffset();
+  bfill.emit_p(PSTR("$S"), strbuf);
+  // bfill.emit_raw(strbuf, strlen(strbuf));
+  return bfill.position();
+}
+
+
+
+
+
+//////////////////////////////////////////////////////////////////////////////////////////// stream file from SD to WEB beta ////////////////////
+
+byte  streamfile (char* name , byte lastflag) { //send a file to the buffer and web
+  File myFile;
+  int  index = 0;
+
+  if (!SD.exists(name)) {
+    Serial.println(F("no file!")); //debug
+    bfill.emit_p(http_404);
+    ether.httpServerReply(bfill.position());
+    return 0;
+  } else {
+    bfill.emit_p(http_Found);
+    ether.httpServerReply(bfill.position());
+  }
+  myFile = SD.open(name);
+  unsigned long  download_num = myFile.size(); // find length of string for send web
+  unsigned long  clientcount = 0;
+
+  char clientline[STR_BUFFER_SIZE + 1];
+  while (myFile.available()) {
+
+    char c = myFile.read();
+    clientcount++;
+    download_num--; // count down of read SD for last load of TCP flag ack
+
+    if (clientcount <= STR_BUFFER_SIZE) {
+
+      clientline[index] = c;// feed char each loop
+      index++;
+
+      // are we too big for the buffer? start tossing out data
+      if (index >= STR_BUFFER_SIZE) { // continue to read more data!
+        index = 0;// reset count up
+      }
+      //continue;
+    }
+
+    if (clientcount >= STR_BUFFER_SIZE) {
+      ether.httpServerReply_with_flags(send_Bfill_position(clientline), TCP_FLAGS_ACK_V);
+      memset(clientline, 0, STR_BUFFER_SIZE + 1); //erase it for re-read SD
+    }
+    if (download_num == 0) { // finish file read from SD
+
+      if (lastflag == TCP_FLAGS_FIN_V) {
+        ether.httpServerReply_with_flags(send_Bfill_position(clientline), TCP_FLAGS_ACK_V | TCP_FLAGS_FIN_V); // if load alone then finish
+      } else {
+        ether.httpServerReply_with_flags(send_Bfill_position(clientline), TCP_FLAGS_ACK_V);    // for other load
+      }
+      memset(clientline, 0, STR_BUFFER_SIZE + 1);
+      //erase it for re-read SD
+    }
+  }
+  myFile.close(); //finish SD
+  return 1; // true complete send to http
+}
